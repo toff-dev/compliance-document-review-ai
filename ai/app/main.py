@@ -12,12 +12,14 @@ from ai.app.core.config import settings
 from ai.app.core.logging import logger
 from ai.app.repositories.analysis_cache import analysis_cache
 from ai.app.repositories.vector_store import vector_store
+from ai.app.services.embedding_service import embedding_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Load seed data and analysis cache
     logger.info("Initializing AI Track Service...")
+    embedding_service.preload()
     vector_loaded = vector_store.load_from_disk()
     if not vector_loaded or len(vector_store.rules) == 0:
         logger.info("Vector store empty on startup. Running automatic seed generator...")

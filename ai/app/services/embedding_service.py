@@ -24,17 +24,41 @@ class EmbeddingService:
         model_name: Optional[str] = None,
         dimension: Optional[int] = None,
     ):
-        self.model_name: str = model_name or getattr(settings, "EMBEDDING_MODEL", "all-MiniLM-L6-v2")
-        self.dimension: int = dimension or getattr(settings, "EMBEDDING_DIMENSION", self.DIMENSION)
+        self.model_name: str = model_name or getattr(
+            settings, "EMBEDDING_MODEL", "all-MiniLM-L6-v2"
+        )
+        self.dimension: int = dimension or getattr(
+            settings, "EMBEDDING_DIMENSION", self.DIMENSION
+        )
         self._model = None
 
     def _get_model(self):
-        """Lazy load SentenceTransformer model singleton."""
+        """Load SentenceTransformer model as a singleton."""
         if self._model is None:
-            logger.info(f"Loading SentenceTransformer embedding model '{self.model_name}'...")
+            logger.info(
+                f"Loading SentenceTransformer embedding model '{self.model_name}'..."
+            )
             from sentence_transformers import SentenceTransformer
+
             self._model = SentenceTransformer(self.model_name)
+            logger.info(
+                f"SentenceTransformer embedding model '{self.model_name}' loaded successfully."
+            )
+
         return self._model
+
+    def preload(self):
+        """
+        Load the embedding model during application startup.
+
+        This prevents the first document-analysis request from waiting
+        for the model to download and initialize.
+        """
+        logger.info(
+            f"Preloading SentenceTransformer model '{self.model_name}'..."
+        )
+        self._get_model()
+        logger.info("SentenceTransformer embedding model preloaded successfully.")
 
     def get_embedding(self, text: str) -> List[float]:
         """
@@ -46,11 +70,15 @@ class EmbeddingService:
 
         model = self._get_model()
         vec = model.encode(text.strip(), normalize_embeddings=True)
+
         if isinstance(vec, np.ndarray):
             return vec.tolist()
+
         return list(vec)
 
-    def get_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
+    def get_embeddings_batch(
+        self, texts: List[str]
+    ) -> List[List[float]]:
         """
         Generate normalized 384-dim float vectors for a batch of texts.
         """
@@ -58,25 +86,45 @@ class EmbeddingService:
             return []
 
         # Separate empty from non-empty to optimize batch encoding
-        indexed_texts = [(i, t.strip()) for i, t in enumerate(texts) if t and t.strip()]
-        
-        results: List[List[float]] = [[0.0] * self.dimension for _ in texts]
+        indexed_texts = [
+            (i, t.strip())
+            for i, t in enumerate(texts)
+            if t and t.strip()
+        ]
+
+        results: List[List[float]] = [
+            [0.0] * self.dimension for _ in texts
+        ]
+
         if not indexed_texts:
             return results
 
         model = self._get_model()
         valid_indices, valid_strings = zip(*indexed_texts)
-        encoded_vecs = model.encode(list(valid_strings), normalize_embeddings=True, show_progress_bar=False)
+
+        encoded_vecs = model.encode(
+            list(valid_strings),
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )
 
         for orig_idx, vec in zip(valid_indices, encoded_vecs):
-            results[orig_idx] = vec.tolist() if isinstance(vec, np.ndarray) else list(vec)
+            results[orig_idx] = (
+                vec.tolist()
+                if isinstance(vec, np.ndarray)
+                else list(vec)
+            )
 
         return results
 
     @staticmethod
-    def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
+    def cosine_similarity(
+        vec_a: List[float],
+        vec_b: List[float],
+    ) -> float:
         """
         Calculate cosine similarity between two vectors.
+
         For normalized vectors, this is the dot product.
         """
         if not vec_a or not vec_b or len(vec_a) != len(vec_b):
@@ -84,6 +132,7 @@ class EmbeddingService:
 
         a = np.array(vec_a, dtype=np.float32)
         b = np.array(vec_b, dtype=np.float32)
+
         norm_a = np.linalg.norm(a)
         norm_b = np.linalg.norm(b)
 
@@ -91,6 +140,7 @@ class EmbeddingService:
             return 0.0
 
         similarity = float(np.dot(a, b) / (norm_a * norm_b))
+
         # Clamp to [-1.0, 1.0] to prevent floating point inaccuracies
         return max(-1.0, min(1.0, similarity))
 
